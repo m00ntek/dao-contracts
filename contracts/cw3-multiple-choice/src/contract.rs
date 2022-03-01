@@ -34,6 +34,7 @@ pub fn instantiate(
         proposal_deposit: msg.proposal_deposit_amount,
         refund_failed_proposals: msg.refund_failed_proposals,
     };
+
     CONFIG.save(deps.storage, &cfg)?;
     let addr = msg.gov_token.addr;
             let cw20_addr = Cw20Contract(
@@ -42,8 +43,8 @@ pub fn instantiate(
                     .map_err(|_| ContractError::InvalidCw20 { addr })?,
             );
 
-            // Save gov token
-            GOV_TOKEN.save(deps.storage, &cw20_addr.addr())?;
+    // Save gov token
+    GOV_TOKEN.save(deps.storage, &cw20_addr.addr())?;
 
     Ok(Response::default())
 }
@@ -90,6 +91,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             start_after,
             limit,
         } => to_binary(&query_list_votes(deps, proposal_id, start_after, limit)?),
+        QueryMsg::GetConfig {} => to_binary(&query_config(deps)?),
         QueryMsg::Voter { address } => to_binary(&query_voter(deps, address)?),
         QueryMsg::Tally { proposal_id } => {
             to_binary(&query_proposal_tally(deps, env, proposal_id)?)

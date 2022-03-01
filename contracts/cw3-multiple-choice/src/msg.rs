@@ -52,6 +52,8 @@ pub enum QueryMsg {
     },
     /// Returns the number of proposals in the DAO (u64)
     ProposalCount {},
+    // Returns config
+    GetConfig {},
     /// Returns VoteResponse
     Vote { proposal_id: u64, voter: String },
     /// Returns VoteListResponse

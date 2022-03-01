@@ -1,52 +1,27 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "InstantiateMsg",
+  "title": "Config",
   "type": "object",
   "required": [
-    "gov_token",
     "max_voting_period",
-    "proposal_deposit_amount",
+    "proposal_deposit",
     "threshold"
   ],
   "properties": {
-    "gov_token": {
-      "description": "Set an existing governance token",
-      "allOf": [
-        {
-          "$ref": "#/definitions/GovTokenMsg"
-        }
-      ]
-    },
     "max_voting_period": {
-      "description": "The amount of time a proposal can be voted on before expiring",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Duration"
-        }
-      ]
+      "$ref": "#/definitions/Duration"
     },
-    "proposal_deposit_amount": {
-      "description": "Deposit required to make a proposal",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Uint128"
-        }
-      ]
+    "proposal_deposit": {
+      "$ref": "#/definitions/Uint128"
     },
     "refund_failed_proposals": {
-      "description": "Refund a proposal if it is rejected",
       "type": [
         "boolean",
         "null"
       ]
     },
     "threshold": {
-      "description": "Voting params configuration",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Threshold"
-        }
-      ]
+      "$ref": "#/definitions/Threshold"
     }
   },
   "definitions": {
@@ -87,17 +62,6 @@
           "additionalProperties": false
         }
       ]
-    },
-    "GovTokenMsg": {
-      "type": "object",
-      "required": [
-        "addr"
-      ],
-      "properties": {
-        "addr": {
-          "type": "string"
-        }
-      }
     },
     "Threshold": {
       "description": "This defines the different ways tallies can happen.\n\nThe total_weight used for calculating success as well as the weights of each individual voter used in tallying should be snapshotted at the beginning of the block at which the proposal starts (this is likely the responsibility of a correct cw4 implementation). See also `ThresholdResponse` in the cw3 spec.",
