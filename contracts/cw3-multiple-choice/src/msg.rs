@@ -1,10 +1,10 @@
+use cosmwasm_std::{CosmosMsg, Decimal, Empty, Uint128};
+use cw_utils::{Duration, Expiration};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use cosmwasm_std::{CosmosMsg, Empty, Decimal, Uint128};
-use cw_utils::{Expiration, Duration};
 use std::collections::HashMap;
 
-use crate::{ContractError, query::ThresholdResponse, state::Vote};
+use crate::{query::ThresholdResponse, state::Vote, ContractError};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct InstantiateMsg {
@@ -16,8 +16,10 @@ pub struct InstantiateMsg {
     pub proposal_deposit_amount: Uint128,
     /// Refund a proposal if it is rejected
     pub refund_failed_proposals: Option<bool>,
-    /// Set an existing governance token
-    pub gov_token: GovTokenMsg,
+    /// The existing governance token address
+    pub gov_token_address: String,
+    /// The parent dao contract address
+    pub parent_dao_contract_address: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -39,7 +41,9 @@ pub enum QueryMsg {
     /// Return ThresholdResponse
     Threshold {},
     /// Returns ProposalResponse
-    Proposal { proposal_id: u64 },
+    Proposal {
+        proposal_id: u64,
+    },
     /// Returns ProposalListResponse
     ListProposals {
         start_after: Option<u64>,
@@ -55,7 +59,10 @@ pub enum QueryMsg {
     // Returns config
     GetConfig {},
     /// Returns VoteResponse
-    Vote { proposal_id: u64, voter: String },
+    Vote {
+        proposal_id: u64,
+        voter: String,
+    },
     /// Returns VoteListResponse
     ListVotes {
         proposal_id: u64,
@@ -64,20 +71,19 @@ pub enum QueryMsg {
     },
     /// Returns information about current tallys for a
     /// proposal. Returns type `VoteTallyResponse`.
-    Tally { proposal_id: u64 },
+    Tally {
+        proposal_id: u64,
+    },
     /// Returns VoterInfo
-    Voter { address: String },
+    Voter {
+        address: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct VoteMsg {
     pub proposal_id: u64,
     pub vote: Vote,
-}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
-pub struct GovTokenMsg {
-    pub addr: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -108,7 +114,10 @@ pub enum Threshold {
     /// Declares a `quorum` of the total votes that must participate in the election in order
     /// for the vote to be considered at all.
     /// See `ThresholdResponse.ThresholdQuorum` in the cw3 spec for details.
-    ThresholdQuorum { threshold: Decimal, quorum: Decimal },
+    ThresholdQuorum {
+        percentage: Decimal,
+        quorum: Decimal,
+    },
 }
 
 impl Threshold {
@@ -120,10 +129,10 @@ impl Threshold {
                 percentage: percentage_needed,
             } => valid_percentage(percentage_needed),
             Threshold::ThresholdQuorum {
-                threshold,
+                percentage,
                 quorum: quroum,
             } => {
-                valid_percentage(threshold)?;
+                valid_percentage(percentage)?;
                 valid_percentage(quroum)
             }
         }
@@ -136,9 +145,9 @@ impl Threshold {
                 percentage,
                 total_weight,
             },
-            Threshold::ThresholdQuorum { threshold, quorum } => {
+            Threshold::ThresholdQuorum { percentage, quorum } => {
                 ThresholdResponse::ThresholdQuorum {
-                    threshold,
+                    percentage,
                     quorum,
                     total_weight,
                 }

@@ -1,9 +1,10 @@
 use cosmwasm_std::{Uint128, BlockInfo, StdResult, CosmosMsg, Deps, Addr, Decimal, WasmMsg, to_binary, MessageInfo, Env, StdError};
 use cw20::Cw20ExecuteMsg;
+use cw3_dao::state::STAKING_CONTRACT;
 use stake_cw20::msg::{
     QueryMsg as StakingContractQueryMsg, StakedBalanceAtHeightResponse, TotalStakedAtHeightResponse,
 };
-use crate::{state::{Proposal, parse_id, STAKING_CONTRACT}, query::ProposalResponse, ContractError};
+use crate::{state::{Proposal, parse_id}, query::ProposalResponse, ContractError};
 
 // Settings for pagination
 pub const MAX_LIMIT: u32 = 30;

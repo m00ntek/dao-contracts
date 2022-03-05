@@ -1,0 +1,1 @@
+pub const DAO_PAUSED_KEY: &str = "dao_paused";

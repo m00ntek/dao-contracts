@@ -343,6 +343,7 @@ dependencies = [
  "cw20",
  "cw20-base",
  "cw3",
+ "cw3-dao",
  "schemars",
  "serde",
  "stake-cw20",

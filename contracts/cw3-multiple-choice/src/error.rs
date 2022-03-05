@@ -21,6 +21,9 @@ pub enum ContractError {
     #[error("Cw20 contract invalid address '{addr}'")]
     InvalidCw20 { addr: String },
 
+    #[error("Cw3 contract invalid address '{addr}'")]
+    InvalidCw3 { addr: String },
+
     #[error("Unauthorized")]
     Unauthorized {},
 
@@ -52,5 +55,8 @@ pub enum ContractError {
     OversizedRequest { size: u64, max: u64 },
 
     #[error("DAO is paused")]
-    Paused {}
+    Paused {},
+
+    #[error("Execute failed")]
+    ExecuteFailed {},
 }

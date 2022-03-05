@@ -1,16 +1,17 @@
 use std::{collections::HashMap, cmp::Ordering};
 
 use cosmwasm_std::{
-    to_binary, entry_point, Empty, Env, MessageInfo, Order, Response, DepsMut, CosmosMsg, Uint128, Deps, Decimal, StdResult, Binary, 
+    to_binary, entry_point, Empty, Env, MessageInfo, Order, Response, DepsMut, CosmosMsg, Uint128, Deps, Decimal, StdResult, Binary, from_slice, Addr, 
 };
 
 use cw2::set_contract_version;
 use cw20::Cw20Contract;
-use cw3::Status;
+use cw3::{Status, Cw3Contract};
+use cw3_dao::{constants::DAO_PAUSED_KEY};
 use cw_storage_plus::Bound;
 use cw_utils::{Expiration, maybe_addr};
 
-use crate::{ContractError, state::{DAO_PAUSED, CONFIG, GOV_TOKEN, next_id, Config}, helpers::{get_staked_balance, get_total_staked_supply, get_deposit_message, get_voting_power_at_height, get_proposal_deposit_refund_message, get_and_check_limit, DEFAULT_LIMIT, MAX_LIMIT, map_proposal}, query::{ProposalResponse, VoteTallyResponse, ProposalListResponse, VoteListResponse, VoterResponse, VoteResponse, ThresholdResponse, ConfigResponse}, msg::{ExecuteMsg, ProposeMsg, VoteMsg, QueryMsg, InstantiateMsg}};
+use crate::{ContractError, state::{CONFIG, next_id, Config}, helpers::{get_staked_balance, get_total_staked_supply, get_deposit_message, get_voting_power_at_height, get_proposal_deposit_refund_message, get_and_check_limit, DEFAULT_LIMIT, MAX_LIMIT, map_proposal}, query::{ProposalResponse, VoteTallyResponse, ProposalListResponse, VoteListResponse, VoterResponse, VoteResponse, ThresholdResponse, ConfigResponse}, msg::{ExecuteMsg, ProposeMsg, VoteMsg, QueryMsg, InstantiateMsg}};
 
 use super::state::{Proposal, Vote, Votes, PROPOSALS, BALLOTS, Ballot, VoteInfo};
 
@@ -28,24 +29,28 @@ pub fn instantiate(
 
     msg.threshold.validate()?;
 
+    let gov_token_addr = Cw20Contract(
+                deps.api
+                    .addr_validate(&msg.gov_token_address)
+                    .map_err(|_| ContractError::InvalidCw20 {addr: msg.gov_token_address.to_string() })?,
+            );
+
+    let parent_dao_contract_addr = Cw3Contract(
+                deps.api
+                    .addr_validate(&msg.parent_dao_contract_address)
+                    .map_err(|_| ContractError::InvalidCw3 { addr: msg.parent_dao_contract_address.to_string() })?,
+            );
+
     let cfg = Config {
         threshold: msg.threshold,
         max_voting_period: msg.max_voting_period,
         proposal_deposit: msg.proposal_deposit_amount,
         refund_failed_proposals: msg.refund_failed_proposals,
+        gov_token_address: gov_token_addr.addr(),
+        parent_dao_contract_address: parent_dao_contract_addr.addr(),
     };
 
     CONFIG.save(deps.storage, &cfg)?;
-    let addr = msg.gov_token.addr;
-            let cw20_addr = Cw20Contract(
-                deps.api
-                    .addr_validate(&addr)
-                    .map_err(|_| ContractError::InvalidCw20 { addr })?,
-            );
-
-    // Save gov token
-    GOV_TOKEN.save(deps.storage, &cw20_addr.addr())?;
-
     Ok(Response::default())
 }
 
@@ -109,18 +114,12 @@ pub fn execute_propose(
     msgs: HashMap<u64, Vec<CosmosMsg<Empty>>>,
     // we ignore earliest
     latest: Option<Expiration>,
-
 ) -> Result<Response<Empty>, ContractError> {
-    // Check if DAO is Paused
-    let paused = DAO_PAUSED.may_load(deps.storage)?;
-    if let Some(expiration) = paused {
-        if !expiration.is_expired(&env.block) {
-            return Err(ContractError::Paused {});
-        }
-    }
-
     let cfg = CONFIG.load(deps.storage)?;
-    let gov_token = GOV_TOKEN.load(deps.storage)?;
+
+    // Check if DAO is Paused
+    let res = check_is_paused(&env, &deps, cfg.parent_dao_contract_address)?;
+    if res {return Err(ContractError::Paused {});}
 
     // Only owners of the gov token can create a proposal
     let balance = get_staked_balance(deps.as_ref(), info.sender.clone())?;
@@ -164,6 +163,7 @@ pub fn execute_propose(
     let id = next_id(deps.storage)?;
     PROPOSALS.save(deps.storage, id, &prop)?;
 
+    let gov_token = cfg.gov_token_address;
     let deposit_msg = get_deposit_message(&env, &info, &cfg.proposal_deposit, &gov_token)?;
 
     Ok(Response::new()
@@ -181,13 +181,11 @@ pub fn execute_vote(
     proposal_id: u64,
     vote: Vote,
 ) -> Result<Response<Empty>, ContractError> {
+    let cfg = CONFIG.load(deps.storage)?;
+
     // Check if DAO is Paused
-    let paused = DAO_PAUSED.may_load(deps.storage)?;
-    if let Some(expiration) = paused {
-        if !expiration.is_expired(&env.block) {
-            return Err(ContractError::Paused {});
-        }
-    }
+    let res = check_is_paused(&env, &deps, cfg.parent_dao_contract_address)?;
+    if res {return Err(ContractError::Paused {});}
 
     // Ensure proposal exists and can be voted on
     let mut prop = PROPOSALS.load(deps.storage, proposal_id)?;
@@ -233,15 +231,11 @@ pub fn execute_execute(
     info: MessageInfo,
     proposal_id: u64,
 ) -> Result<Response, ContractError> {
-    // Check if DAO is Paused
-    let paused = DAO_PAUSED.may_load(deps.storage)?;
-    if let Some(expiration) = paused {
-        if !expiration.is_expired(&env.block) {
-            return Err(ContractError::Paused {});
-        }
-    }
+    let cfg = CONFIG.load(deps.storage)?;
 
-    let gov_token = GOV_TOKEN.load(deps.storage)?;
+    // Check if DAO is Paused
+    let res = check_is_paused(&env, &deps, cfg.parent_dao_contract_address)?;
+    if res {return Err(ContractError::Paused {});}
 
     // Anyone can trigger this if the vote passed
     let mut prop = PROPOSALS.load(deps.storage, proposal_id)?;
@@ -254,7 +248,7 @@ pub fn execute_execute(
     // Set it to executed
     prop.status = Status::Executed;
     PROPOSALS.save(deps.storage, proposal_id, &prop)?;
-
+    let gov_token = cfg.gov_token_address;
     let refund_msg =
         get_proposal_deposit_refund_message(&prop.proposer, &prop.deposit, &gov_token)?;
 
@@ -284,15 +278,11 @@ pub fn execute_close(
     info: MessageInfo,
     proposal_id: u64,
 ) -> Result<Response<Empty>, ContractError> {
-    // Check if DAO is Paused
-    let paused = DAO_PAUSED.may_load(deps.storage)?;
-    if let Some(expiration) = paused {
-        if !expiration.is_expired(&env.block) {
-            return Err(ContractError::Paused {});
-        }
-    }
+    let cfg = CONFIG.load(deps.storage)?;
 
-    let gov_token = GOV_TOKEN.load(deps.storage)?;
+    // Check if DAO is Paused
+    let res = check_is_paused(&env, &deps, cfg.parent_dao_contract_address)?;
+    if res {return Err(ContractError::Paused {});}
 
     // Anyone can trigger this if the vote passed
     let mut prop = PROPOSALS.load(deps.storage, proposal_id)?;
@@ -310,7 +300,7 @@ pub fn execute_close(
     prop.status = Status::Rejected;
     PROPOSALS.save(deps.storage, proposal_id, &prop)?;
 
-    let cfg = CONFIG.load(deps.storage)?;
+    let gov_token = cfg.gov_token_address;
 
     let response_with_optional_refund = match cfg.refund_failed_proposals {
         Some(true) => Response::new().add_messages(get_proposal_deposit_refund_message(
@@ -463,4 +453,20 @@ fn query_voter(deps: Deps, voter: String) -> StdResult<VoterResponse> {
     Ok(VoterResponse {
         weight: Some(weight),
     })
+}
+
+// Query parent dao contract storage 
+fn check_is_paused(env: &Env, deps: &DepsMut, parent_contract_address: Addr) -> Result<bool, ContractError> {
+    let res = deps.querier.query_wasm_raw(parent_contract_address, DAO_PAUSED_KEY.as_bytes());
+    if res.is_err() {
+        return Err(ContractError::ExecuteFailed {});
+    }
+
+    let paused = res.unwrap();
+    if let Some(bytes) = paused {
+        let exp = from_slice::<Expiration>(&bytes)?;
+        if !exp.is_expired(&env.block) { return Ok(true); }
+        }
+
+    return Ok(false);
 }

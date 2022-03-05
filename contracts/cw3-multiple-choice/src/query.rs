@@ -1,10 +1,10 @@
-use crate::state::{Votes, VoteInfo, Config};
+use crate::state::{Config, VoteInfo, Votes};
 use cosmwasm_std::{Addr, CosmosMsg, Decimal, Empty, Uint128};
-use cw3::{Status};
+use cw3::Status;
 use cw_utils::Expiration;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{fmt, collections::HashMap};
+use std::{collections::HashMap, fmt};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct ProposalListResponse {
@@ -120,12 +120,11 @@ pub enum ThresholdResponse {
     /// or allow low percentages to pass, independently of if there was high participation in the
     /// election or not.
     ThresholdQuorum {
-        threshold: Decimal,
+        percentage: Decimal,
         quorum: Decimal,
         total_weight: Uint128,
     },
 }
-
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct VoteResponse {

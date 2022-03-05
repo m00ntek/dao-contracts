@@ -1,9 +1,11 @@
 use std::{collections::HashMap, convert::TryInto};
 
-use cosmwasm_std::{Addr, BlockInfo, CosmosMsg, Empty, Uint128, StdResult, StdError, Storage};
-use cw3::{Status};
-use cw_storage_plus::{Map, Item};
-use cw_utils::{Expiration, Duration};
+use cosmwasm_std::{
+    Addr, BlockInfo, CosmosMsg, Decimal, Empty, StdError, StdResult, Storage, Uint128,
+};
+use cw3::Status;
+use cw_storage_plus::{Item, Map};
+use cw_utils::{Duration, Expiration};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +17,8 @@ pub struct Config {
     pub max_voting_period: Duration,
     pub proposal_deposit: Uint128,
     pub refund_failed_proposals: Option<bool>,
+    pub gov_token_address: Addr,
+    pub parent_dao_contract_address: Addr,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -60,57 +64,50 @@ impl Proposal {
         self.status = self.current_status(block);
     }
 
-   // returns true iff this proposal is sure to pass (even before expiration if no future
-    // sequence of possible votes can cause it to fail)
     pub fn is_passed(&self, block: &BlockInfo) -> bool {
+        let threshold: Decimal;
         match self.threshold {
-            Threshold::AbsolutePercentage {
-                percentage: percentage_needed,
-            } => {
-                // Check if any of the choices has reached the threshold
-                for v in self.votes.vote_counts.values() {
-                    if *v >= votes_needed(self.total_weight, percentage_needed) {
-                        return true
-                    }
-                }
-                return false
+            Threshold::AbsolutePercentage { percentage } => {
+                threshold = percentage;
             }
-            Threshold::ThresholdQuorum { threshold, quorum } => {
-                // we always require the quorum
+            Threshold::ThresholdQuorum { quorum, percentage } => {
+                // If quorum votes have not been cast, proposal cannot pass
                 if self.votes.total() < votes_needed(self.total_weight, quorum) {
                     return false;
                 }
-                if self.expires.is_expired(block) {
-                    // If expired, we compare Yes votes against the total number of votes
-                    for v in self.votes.vote_counts.values() {
-                        if *v >= votes_needed(self.votes.total(), threshold) {
-                            return true
-                        }
-                    }
-                } else {
-                    // If not expired, we must assume all non-votes will be cast as No.
-                    // We compare threshold against the total weight
-                    for v in self.votes.vote_counts.values() {
-                        if *v >= votes_needed(self.total_weight, threshold) {
-                            return true
-                        }
-                    }
-                }
-                return false
+                threshold = percentage;
             }
         }
+
+        if self.expires.is_expired(block) {
+            // If expired, we compare Yes votes against the total number of votes
+            for v in self.votes.vote_counts.values() {
+                if *v >= votes_needed(self.votes.total(), threshold) {
+                    return true;
+                }
+            }
+        } else {
+            // If not expired, we must assume all non-votes will be cast as No.
+            // We compare threshold against the total weight
+            for v in self.votes.vote_counts.values() {
+                if *v >= votes_needed(self.total_weight, threshold) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct Vote {
-    // A vote is a vector indicating which option(s) the user has selected.
-    pub votes: HashMap<u64, bool>,
+    // A vote indicates which option the user has selected.
+    pub option: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct Votes {
-    // Vote counts is a vector of integers indicating the vote weights for each option.
+    // Vote counts is a vector of integers indicating the vote weight for each option.
     pub vote_counts: HashMap<u64, Uint128>,
 }
 
@@ -121,15 +118,11 @@ impl Votes {
     }
 
     pub fn add_vote(&mut self, vote: Vote, mut weight: Uint128) {
-        // for each vote selected in the votes array, add the vote weight
-        for v in vote.votes {
-            if v.1 {
-                if self.vote_counts.contains_key(&v.0) {
-                    weight += self.vote_counts.get(&v.0).unwrap();
-                }
-                self.vote_counts.insert(v.0, weight);
-            }
+        // add the vote to total vote count
+        if self.vote_counts.contains_key(&vote.option) {
+            weight += self.vote_counts.get(&vote.option).unwrap();
         }
+        self.vote_counts.insert(vote.option, weight);
     }
 }
 
@@ -165,14 +158,8 @@ pub fn next_id(store: &mut dyn Storage) -> StdResult<u64> {
     Ok(id)
 }
 
-pub const BALLOTS: Map<(u64, &Addr), Ballot> = Map::new("multiple-choice-votes");
-pub const PROPOSALS: Map<u64, Proposal> = Map::new("multiple-choice-proposals");
+pub const BALLOTS: Map<(u64, &Addr), Ballot> = Map::new("multiple_choice_votes");
+pub const PROPOSALS: Map<u64, Proposal> = Map::new("multiple_choice_proposals");
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const PROPOSAL_COUNT: Item<u64> = Item::new("proposal_count");
-pub const DAO_PAUSED: Item<Expiration> = Item::new("dao_paused"); 
-
-// Total weight and voters are queried from this contract
-pub const STAKING_CONTRACT: Item<Addr> = Item::new("staking_contract");
-
-pub const GOV_TOKEN: Item<Addr> = Item::new("gov_token");
